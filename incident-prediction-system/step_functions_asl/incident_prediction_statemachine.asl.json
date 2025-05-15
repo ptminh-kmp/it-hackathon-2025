@@ -1,0 +1,105 @@
+{
+    "Comment": "State machine to process a batch of CLEANED service logs, aggregate, and predict incidents.",
+    "StartAt": "ListCleanLogFiles",
+    "States": {
+      "ListCleanLogFiles": {
+        "Type": "Task",
+        "Resource": "arn:aws:lambda:YOUR_AWS_REGION:YOUR_ACCOUNT_ID:function:YourPrefix-ListCleanLogFilesLambda",
+        "Parameters": {
+          "BatchID.$": "$.BatchID",
+          "S3Bucket.$": "$.S3Bucket",
+          "BatchFolderPath.$": "$.BatchFolderPath"
+        },
+        "ResultPath": "$.ListFilesOutput",
+        "Next": "ProcessEachCleanLogFile",
+        "Catch": [
+          {
+            "ErrorEquals": [ "States.ALL" ],
+            "Next": "NotifyBatchFailure",
+            "ResultPath": "$.ErrorDetails"
+          }
+        ]
+      },
+      "ProcessEachCleanLogFile": {
+        "Type": "Map",
+        "ItemsPath": "$.ListFilesOutput.CleanLogFiles", 
+        "MaxConcurrency": 10, 
+        "Parameters": { 
+          "BatchID.$": "$.ListFilesOutput.BatchID", 
+          "S3Bucket.$": "$.ListFilesOutput.S3Bucket",
+          "CleanLogFile.$": "$$.Map.Item.Value" 
+        },
+        "Iterator": {
+          "StartAt": "InvokeWorkerCleanLogLambda",
+          "States": {
+            "InvokeWorkerCleanLogLambda": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:YOUR_AWS_REGION:YOUR_ACCOUNT_ID:function:YourPrefix-WorkerCleanLogLambda",
+              "TimeoutSeconds": 300, 
+              "Retry": [ { 
+                "ErrorEquals": [ "States.TaskFailed", "States.Timeout", "Lambda.ServiceException", "Lambda.TooManyRequestsException" ],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 2,
+                "BackoffRate": 1.5
+              } ],
+              "ResultPath": null,
+              "End": true 
+            }
+          }
+        },
+        "ResultPath": null,
+        "Next": "InvokeAggregationCleanLogLambda",
+        "Catch": [
+          {
+            "ErrorEquals": [ "States.ALL" ],
+            "Next": "NotifyBatchFailure",
+            "ResultPath": "$.ErrorDetails" 
+          }
+        ]
+      },
+      "InvokeAggregationCleanLogLambda": {
+        "Type": "Task",
+        "Resource": "arn:aws:lambda:YOUR_AWS_REGION:YOUR_ACCOUNT_ID:function:YourPrefix-AggregationCleanLogLambda",
+        "Parameters": {
+          "ListFilesResult.$": "$.ListFilesOutput" 
+        },
+        "ResultPath": "$.AggregationOutput",
+        "Next": "NotifyBatchSuccess",
+        "Catch": [
+          {
+            "ErrorEquals": [ "States.ALL" ],
+            "Next": "NotifyBatchFailure",
+            "ResultPath": "$.ErrorDetails"
+          }
+        ]
+      },
+      "NotifyBatchSuccess": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish", 
+        "Parameters": {
+          "TopicArn": "arn:aws:sns:YOUR_AWS_REGION:YOUR_ACCOUNT_ID:YourSuccessSNSTopic",
+          "Message": {
+            "Status": "SUCCESS",
+            "BatchID.$": "$.ListFilesOutput.BatchID",
+            "Message": "Batch processing completed successfully.",
+            "AggregationResultPreview.$": "States.StringToJson($.AggregationOutput.body).message"
+          }
+        },
+        "End": true
+      },
+      "NotifyBatchFailure": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish", 
+        "Parameters": {
+          "TopicArn": "arn:aws:sns:YOUR_AWS_REGION:YOUR_ACCOUNT_ID:YourFailureSNSTopic",
+          "Message": {
+            "Status": "FAILED",
+            "BatchID.$": "$.ListFilesOutput.BatchID",
+            "ErrorDetails.$": "$.ErrorDetails",
+            "StateMachineExecutionArn.$": "$$.Execution.Id"
+          }
+        },
+        "End": true
+      }
+    }
+  }
