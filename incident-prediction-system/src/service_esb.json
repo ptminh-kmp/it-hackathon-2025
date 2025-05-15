@@ -1,0 +1,72 @@
+{
+  "service_name": "API Gateway Service (Processed Logs)",
+  "log_file_format": "csv",
+  "csv_processing_options": {
+    "delimiter": ",",
+    "quotechar": "\"",
+    "has_header": true 
+  },
+  "csv_column_to_field_mapping": { 
+    "correlation_id": "correlationId",
+    "handler_function": "message",      // Tên cột "message" chứa tên hàm xử lý
+    "elapsed_time_ms": "elapsed",       // Tên cột "elapsed"
+    "timestamp_log": "timestamp",       // Tên cột "timestamp"
+    "log_content_detail": "content",    // Tên cột "content"
+    "application_name_source": "applicationName" // Tên cột "applicationName"
+  },
+  "timestamp_processing": { // Xử lý cho cột "timestamp"
+    "source_field": "timestamp", // Tên trường chuẩn (đã map từ "timestamp_log")
+    "input_format": "%Y-%m-%dT%H:%M:%S.%f%z" // Ví dụ: "2025-04-19T23:00:21.021+0700" hoặc "%Y-%m-%dT%H:%M:%S.%fZ" nếu là UTC
+                                          // Cần kiểm tra định dạng timestamp chính xác trong log APIGW
+                                          // Nếu timestamp không có múi giờ, get_aware_utc_datetime sẽ giả định UTC
+  },
+  "error_condition": { // BẠN CẦN XÁC ĐỊNH CÁCH NHẬN BIẾT LỖI TỪ LOG APIGW
+                      // Ví dụ: nếu cột "content" chứa từ "ERROR" hoặc "FAILED"
+                      // Hoặc nếu có một cột trạng thái HTTP (ví dụ "http_status") >= 400
+    "field_to_check": "log_content_detail", // Kiểm tra trong trường nội dung log (đã map từ "content")
+    "operator": "contains_any_keyword", // Loại điều kiện mới: chứa bất kỳ keyword nào
+    "keywords": ["ERROR", "FAILED", "EXCEPTION", "TIMEOUT", "STATUS_5XX", "UNAUTHORIZED"] // Các keyword báo lỗi
+    // Hoặc nếu có cột status_code:
+    // "field_to_check": "http_status_code_mapped", // Giả sử bạn map cột status code
+    // "operator": ">=",
+    // "value": 400
+  },
+  "critical_keywords_in_message_field": [], // Có thể không cần nếu đã có error_condition
+                                            // Hoặc bạn có thể dùng cho trường "log_content_detail"
+  "metrics_to_derive_from_csv": [
+    {
+      "name": "apigw_total_error_lines_in_file",
+      "description": "Tổng số dòng log lỗi được xác định trong file CSV APIGW.",
+      "type": "count_if_condition_met", 
+      // Điều kiện sẽ dựa trên error_condition ở trên (parser sẽ tự áp dụng)
+      // Hoặc bạn có thể lặp lại điều kiện ở đây nếu muốn metric độc lập
+      "condition_field": "log_content_detail", // Phải khớp với field_to_check trong error_condition
+      "condition_operator": "contains_any_keyword",
+      "condition_values_list": ["ERROR", "FAILED", "EXCEPTION", "TIMEOUT", "STATUS_5XX"] // Danh sách keyword
+    },
+    {
+      "name": "apigw_avg_elapsed_time_ms",
+      "description": "Thời gian xử lý (elapsed) trung bình của tất cả các step trong file.",
+      "type": "average_of_field",
+      "target_field": "elapsed_time_ms" // Tên trường chuẩn
+    },
+    {
+      "name": "apigw_high_latency_event_count",
+      "description": "Đếm số step có elapsed time > 1500ms.",
+      "type": "count_if_condition_met",
+      "condition_field": "elapsed_time_ms", // Tên trường chuẩn
+      "condition_operator": ">",
+      "condition_value": 1500
+    },
+    {
+      "name": "apigw_events_by_handler", // Đếm số lần mỗi hàm xử lý xuất hiện
+      "description": "Đếm số sự kiện theo từng hàm xử lý (message).",
+      "type": "count_by_field_value", 
+      "count_field": "handler_function" // Tên trường chuẩn
+    }
+  ],
+  "summary_options": { 
+    "max_error_event_examples": 5, 
+    "max_critical_info_from_keywords": 3 // Có thể lấy từ 'log_content_detail'
+  }
+}
