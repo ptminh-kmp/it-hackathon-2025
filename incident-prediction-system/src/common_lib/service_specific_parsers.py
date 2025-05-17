@@ -189,7 +189,7 @@ def _derive_metrics_from_parsed_data( # Đổi tên từ _derive_metrics_from_pa
     return derived_metrics
 
 # --- Processor cho ESB Service (File CSV chỉ chứa lỗi) ---
-def process_esb_logs(csv_log_content: str, esb_config: dict, processing_time_utc: datetime | None = None):
+def process_esb_clean_logs(csv_log_content: str, esb_config: dict, processing_time_utc: datetime | None = None):
     service_name = esb_config.get("service_name", "ESB Service (Error Logs Only)")
     print(f"ESB CSV Parser (Assumed Error Logs Only): Processing for service: '{service_name}'")
     
@@ -277,7 +277,7 @@ def process_esb_logs(csv_log_content: str, esb_config: dict, processing_time_utc
 
 
 # --- Processor cho APIGW Service (File CSV, cần xác định lỗi) ---
-def process_apigw_logs(csv_log_content: str, apigw_config: dict, processing_time_utc: datetime | None = None):
+def process_apigw_clean_logs(csv_log_content: str, apigw_config: dict, processing_time_utc: datetime | None = None):
     service_name = apigw_config.get("service_name", "APIGW Service")
     print(f"APIGW CSV Parser: Processing CSV data for service: '{service_name}'")
     
@@ -396,7 +396,7 @@ def process_apigw_logs(csv_log_content: str, apigw_config: dict, processing_time
 
 
 # --- Processor cho ROC Service (File CSV, cột _source.log chứa string không cấu trúc) ---
-def process_roc_logs(csv_log_content: str, roc_config: dict, processing_time_utc: datetime | None = None):
+def process_roc_clean_logs(csv_log_content: str, roc_config: dict, processing_time_utc: datetime | None = None):
     service_name = roc_config.get("service_name", "ROC Service")
     print(f"ROC CSV Parser: Processing CSV data for service: '{service_name}'")
     
