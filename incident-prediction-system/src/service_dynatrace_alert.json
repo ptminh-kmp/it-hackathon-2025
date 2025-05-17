@@ -1,0 +1,47 @@
+{
+  "service_name": "Dynatrace Alert Details",
+  "log_file_format": "json_dynatrace_alert", 
+  "json_alert_processing": { 
+    "problem_id_field": "problemId",
+    "display_id_field": "displayId",
+    "title_field": "title",
+    "status_field": "status",
+    "severity_level_field": "severityLevel", 
+    "impact_level_field": "impactLevel",
+    "start_time_field": "startTime", 
+    "end_time_field": "endTime",    
+    "impacted_entities_field": "impactedEntities", 
+    "root_cause_entity_field": "rootCauseEntity",
+    "management_zones_field": "managementZones",
+    "problem_filters_field": "problemFilters", 
+    "problem_details_text_field": "problemDetails.details.problemText" 
+  },
+  "timestamp_processing": { 
+    "fields_to_parse": ["startTime", "endTime"], 
+    "input_format_is_unix_ms": true 
+  },
+  "critical_keywords_in_problem_details": [ 
+    "critical", "outage", "severe", "unplanned downtime", "data loss"
+  ],
+  "metrics_to_derive_from_alert_json": [ 
+    {
+      "name": "dynatrace_active_critical_alerts",
+      "description": "Đếm số cảnh báo Dynatrace nghiêm trọng (Severity: AVAILABILITY hoặc ERROR) và đang ACTIVE.",
+      "type": "count_if_multiple_conditions_met",
+      "conditions": [
+        {"field": "severityLevel", "operator": "in", "values": ["AVAILABILITY", "ERROR", "PERFORMANCE"]}, 
+        {"field": "status", "operator": "==", "value": "OPEN"} 
+      ]
+    },
+    {
+        "name": "dynatrace_alerts_by_severity",
+        "description": "Đếm số cảnh báo Dynatrace theo mức độ nghiêm trọng.",
+        "type": "count_by_field_value",
+        "count_field": "severityLevel"
+    }
+  ],
+  "summary_options": { 
+    "max_alert_summary_fields": ["problemId", "title", "severityLevel", "status", "startTime"],
+    "max_critical_info_from_keywords": 3 
+  }
+}
