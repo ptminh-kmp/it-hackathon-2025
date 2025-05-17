@@ -521,92 +521,140 @@ def process_roc_clean_logs(csv_log_content: str, roc_config: dict, processing_ti
 
 # --- Processor cho Dynatrace Alert (JSON) ---
 def process_dynatrace_alert_json(json_alert_content: str, dynatrace_config: dict):
-    # ... (Giữ nguyên như phiên bản trước)
-    service_name = dynatrace_config.get("service_name", "Dynatrace Alert")
+    service_name = dynatrace_config.get("service_name", "Dynatrace Alerts") # Đổi tên cho rõ ràng hơn
     print(f"Dynatrace Alert Parser: Processing data for '{service_name}'")
-    extracted_phenomena = {"service_name": service_name, "errors_summary": [], "metrics_summary": {}, "other_key_info": []}
-    
+
+    # extracted_phenomena sẽ chứa kết quả tổng hợp từ TẤT CẢ các alert trong file
+    extracted_phenomena = {
+        "service_name": service_name,
+        "errors_summary": [], # Sẽ chứa thông tin tóm tắt của từng alert được xử lý
+        "metrics_summary": {}, # Các metric tổng hợp từ tất cả các alert
+        "other_key_info": []   # Các thông tin quan trọng khác tổng hợp
+    }
+
     cfg_json_processing = dynatrace_config.get("json_alert_processing", {})
     cfg_ts_processing = dynatrace_config.get("timestamp_processing", {})
-    cfg_ts_fields_to_parse = cfg_ts_processing.get("fields_to_parse", []) # list các JSON key (đường dẫn) chứa timestamp
+    cfg_ts_fields_to_parse = cfg_ts_processing.get("fields_to_parse", [])
     cfg_ts_is_unix_ms = cfg_ts_processing.get("input_format_is_unix_ms", False)
-    cfg_ts_input_format = cfg_ts_processing.get("input_format") # Ví dụ: "%Y-%m-%dT%H:%M:%S.%fZ"
+    cfg_ts_input_format = cfg_ts_processing.get("input_format")
 
     cfg_critical_keywords = dynatrace_config.get("critical_keywords_in_problem_details", [])
-    cfg_problem_details_field_path = cfg_json_processing.get("problem_details_text_field", "") 
+    cfg_problem_details_field_path = cfg_json_processing.get("problem_details_text_field", "")
     
     cfg_metric_definitions = dynatrace_config.get("metrics_to_derive_from_alert_json", [])
-    cfg_summary_fields_paths = dynatrace_config.get("summary_options", {}).get("max_alert_summary_fields", []) # list các JSON key path
-    cfg_max_crit_info = dynatrace_config.get("summary_options", {}).get("max_critical_info_from_keywords", 3)
+    # cfg_summary_fields_paths dùng để tạo tóm tắt cho từng alert
+    cfg_summary_fields_paths = dynatrace_config.get("summary_options", {}).get("max_alert_summary_fields", [])
+    cfg_max_crit_info_global = dynatrace_config.get("summary_options", {}).get("max_critical_info_from_keywords", 3)
+    # max_alert_summary_examples sẽ giới hạn số lượng alert được đưa vào errors_summary
+    cfg_max_alert_summary_examples = dynatrace_config.get("summary_options", {}).get("max_error_event_examples", 5)
+
+
+    all_processed_alert_items_for_metrics = [] # List để chứa các dict đã xử lý cho việc tính metric
 
     try:
-        alert_data_dict_orig = json.loads(json_alert_content)
-        if not isinstance(alert_data_dict_orig, dict):
-            extracted_phenomena["errors_summary"].append(f"Dynatrace alert data not a JSON object: {type(alert_data_dict_orig)}")
+        # File clean là một JSON array, mỗi phần tử là một alert object
+        alerts_list = json.loads(json_alert_content)
+        if not isinstance(alerts_list, list):
+            msg = f"Dynatrace alert data for {service_name} is not a JSON list as expected. Received type: {type(alerts_list)}. Content (start): {json_alert_content[:200]}"
+            print(f"ERROR Dynatrace Alert Parser: {msg}")
+            extracted_phenomena["errors_summary"].append(msg)
             return extracted_phenomena
         
-        # processed_alert_item_for_metrics sẽ chứa các giá trị đã được trích xuất và chuẩn hóa tên trường
-        # dựa trên mapping từ cfg_json_processing (key là tên trường chuẩn, value là đường dẫn trong JSON alert)
-        processed_alert_item_for_metrics = {}
-        alert_summary_parts_for_display = []
+        print(f"DEBUG Dynatrace Alert Parser: Loaded {len(alerts_list)} alert objects from JSON array for {service_name}.")
 
-        for std_field_name, dt_field_path in cfg_json_processing.items():
-            path_keys = dt_field_path.split('.')
-            current_val = alert_data_dict_orig
-            try:
-                for key_part in path_keys:
-                    if isinstance(current_val, dict): current_val = current_val.get(key_part)
-                    elif isinstance(current_val, list) and key_part.isdigit() and int(key_part) < len(current_val): # Xử lý index cho list
-                        current_val = current_val[int(key_part)]
-                    else: current_val = None; break
-            except: current_val = None
+        for alert_idx, alert_data_dict_orig in enumerate(alerts_list):
+            if not isinstance(alert_data_dict_orig, dict):
+                print(f"Warning Dynatrace Alert Parser: Item {alert_idx} in array is not a dictionary. Skipping.")
+                continue
 
-            if current_val is not None:
-                processed_val = current_val
-                # Kiểm tra xem trường này có phải là timestamp cần parse không
-                # So sánh dt_field_path (key gốc từ JSON) với danh sách cfg_ts_fields_to_parse
-                if dt_field_path in cfg_ts_fields_to_parse:
-                    if cfg_ts_is_unix_ms:
-                        try: processed_val = datetime.fromtimestamp(int(current_val) / 1000, timezone.utc).isoformat() + "Z"
-                        except (TypeError, ValueError): processed_val = str(current_val) 
-                    elif cfg_ts_input_format:
-                         try: processed_val = get_aware_utc_datetime(str(current_val), cfg_ts_input_format).isoformat() + "Z"
-                         except: processed_val = str(current_val)
-                
-                processed_alert_item_for_metrics[std_field_name] = processed_val 
-                if dt_field_path in cfg_summary_fields_paths: # So sánh với key gốc từ JSON
-                    alert_summary_parts_for_display.append(f"{std_field_name}: {str(processed_val)[:100]}")
-        
-        if alert_summary_parts_for_display:
-            extracted_phenomena["errors_summary"].append("; ".join(alert_summary_parts_for_display))
+            # processed_alert_item_for_metrics sẽ chứa các giá trị đã được trích xuất và chuẩn hóa tên trường
+            # dựa trên mapping từ cfg_json_processing (key là tên trường chuẩn, value là đường dẫn trong JSON alert)
+            processed_alert_item_for_metrics = {}
+            alert_summary_parts_for_display = [] # Tóm tắt cho alert hiện tại
 
-        if cfg_problem_details_field_path and cfg_critical_keywords:
-            path_keys = cfg_problem_details_field_path.split('.')
-            problem_text = alert_data_dict_orig
-            try:
-                for key_part in path_keys:
-                    if isinstance(problem_text, dict): problem_text = problem_text.get(key_part)
-                    else: problem_text = None; break
-            except: problem_text = None
+            problem_id_for_log = alert_data_dict_orig.get(cfg_json_processing.get('problem_id_field', 'unknownProblemId'))
 
-            if isinstance(problem_text, str):
-                problem_text_lower = problem_text.lower()
-                for keyword in cfg_critical_keywords:
-                    if keyword.lower() in problem_text_lower:
-                        if len(extracted_phenomena["other_key_info"]) < cfg_max_crit_info:
-                            extracted_phenomena["other_key_info"].append(f"Dynatrace Keyword '{keyword}' in details: {problem_text[:150]}...")
-                        break 
-        
-        if processed_alert_item_for_metrics: 
+
+            for std_field_name, dt_field_path in cfg_json_processing.items():
+                path_keys = dt_field_path.split('.')
+                current_val = alert_data_dict_orig
+                try:
+                    for key_part in path_keys:
+                        if isinstance(current_val, dict): current_val = current_val.get(key_part)
+                        elif isinstance(current_val, list) and key_part.isdigit() and int(key_part) < len(current_val):
+                            current_val = current_val[int(key_part)]
+                        else: current_val = None; break
+                except: current_val = None
+
+                if current_val is not None:
+                    processed_val = current_val
+                    # Kiểm tra xem trường này có phải là timestamp cần parse không
+                    if dt_field_path in cfg_ts_fields_to_parse:
+                        if cfg_ts_is_unix_ms:
+                            try: processed_val = datetime.fromtimestamp(int(current_val) / 1000, timezone.utc).isoformat() + "Z"
+                            except (TypeError, ValueError): processed_val = str(current_val) 
+                        elif cfg_ts_input_format:
+                             try: processed_val = get_aware_utc_datetime(str(current_val), cfg_ts_input_format).isoformat() + "Z"
+                             except: processed_val = str(current_val)
+                    
+                    processed_alert_item_for_metrics[std_field_name] = processed_val 
+                    # So sánh dt_field_path (key gốc từ JSON) với danh sách cfg_summary_fields_paths
+                    if dt_field_path in cfg_summary_fields_paths: 
+                        alert_summary_parts_for_display.append(f"{std_field_name}: {str(processed_val)[:100]}")
+            
+            # Thêm tóm tắt của alert này vào errors_summary (nếu chưa đầy)
+            if len(extracted_phenomena["errors_summary"]) < cfg_max_alert_summary_examples:
+                if alert_summary_parts_for_display:
+                    extracted_phenomena["errors_summary"].append(f"Dynatrace Alert (ID: {problem_id_for_log}): {'; '.join(alert_summary_parts_for_display)}")
+                else: # Nếu không có trường nào trong summary_fields, lấy title hoặc problemId
+                    title = processed_alert_item_for_metrics.get(cfg_json_processing.get("title_field", "title"), problem_id_for_log) # Đã map
+                    extracted_phenomena["errors_summary"].append(f"Dynatrace Alert (ID: {problem_id_for_log}): {str(title)[:150]}")
+
+
+            # Kiểm tra critical keywords trong problem details của alert hiện tại
+            if cfg_problem_details_field_path and cfg_critical_keywords:
+                path_keys = cfg_problem_details_field_path.split('.')
+                problem_text_val = alert_data_dict_orig # Bắt đầu từ gốc của alert object hiện tại
+                try:
+                    for key_part in path_keys:
+                        if isinstance(problem_text_val, dict): problem_text_val = problem_text_val.get(key_part)
+                        else: problem_text_val = None; break
+                except: problem_text_val = None
+
+                if isinstance(problem_text_val, str):
+                    problem_text_lower = problem_text_val.lower()
+                    for keyword in cfg_critical_keywords:
+                        if keyword.lower() in problem_text_lower:
+                            if len(extracted_phenomena["other_key_info"]) < cfg_max_crit_info_global: # Dùng giới hạn toàn cục
+                                extracted_phenomena["other_key_info"].append(f"Dynatrace Alert (ID: {problem_id_for_log}) Keyword '{keyword}': {problem_text_val[:150]}...")
+                            break # Chỉ cần 1 keyword/alert detail
+            
+            # Thêm processed_alert_item_for_metrics (đã chuẩn hóa tên trường) vào list để tính metric tổng hợp
+            if processed_alert_item_for_metrics:
+                all_processed_alert_items_for_metrics.append(processed_alert_item_for_metrics)
+
+        # Sau khi lặp qua tất cả các alert trong file JSON array:
+        # Tính toán các metric tổng hợp từ all_processed_alert_items_for_metrics
+        if all_processed_alert_items_for_metrics: 
             extracted_phenomena["metrics_summary"] = _derive_metrics_from_parsed_data(
-                [processed_alert_item_for_metrics], 
-                cfg_metric_definitions, service_name
+                all_processed_alert_items_for_metrics, 
+                cfg_metric_definitions, 
+                service_name
             )
-    except json.JSONDecodeError:
-        extracted_phenomena["errors_summary"].append("Lỗi đọc Dynatrace JSON.")
-    except Exception as e:
-        extracted_phenomena["errors_summary"].append(f"Lỗi xử lý Dynatrace: {str(e)}")
-        traceback.print_exc()
+        else: # Nếu file JSON rỗng hoặc không có alert object nào hợp lệ
+            extracted_phenomena["metrics_summary"] = {}
 
-    print(f"CleanParser: Finished processing Dynatrace Alert for '{service_name}'. Extracted: {json.dumps(extracted_phenomena, ensure_ascii=False)}")
+
+    except json.JSONDecodeError:
+        msg = f"Dynatrace alert data for {service_name} is not valid JSON. Content (start): {json_alert_content[:200]}"
+        print(f"ERROR Dynatrace Alert Parser: {msg}")
+        extracted_phenomena["errors_summary"].append(msg)
+    except Exception as e:
+        msg = f"Error processing Dynatrace alert data for {service_name}: {e}"
+        print(f"ERROR Dynatrace Alert Parser: {msg}")
+        traceback.print_exc()
+        extracted_phenomena["errors_summary"].append(msg)
+
+    print(f"CleanParser: Finished processing Dynatrace Alerts for '{service_name}'. Extracted: {json.dumps(extracted_phenomena, ensure_ascii=False)}")
     return extracted_phenomena
+
