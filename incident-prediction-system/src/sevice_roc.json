@@ -1,0 +1,46 @@
+{
+  "service_name": "ROC Service (Keyword Analysis)",
+  "log_file_format": "csv_with_unstructured_log_column",
+  "csv_processing_options": {
+    "delimiter": ",",    
+    "quotechar": "\"",
+    "has_header": true     
+  },
+  "unstructured_log_column_name": "_source.log",
+  "csv_metadata_columns_to_keep": ["timestamp", "hostname", "req_id"], 
+
+  "timestamp_processing": { // Nếu có cột timestamp riêng trong CSV (ngoài _source.log)
+    "source_field_in_csv": "timestamp", // Tên cột timestamp trong file CSV gốc
+    "input_format": "%Y-%m-%dT%H:%M:%S.%fZ"
+  },
+  "roc_log_string_analysis": {
+    "keywords_to_extract": [ 
+      {"keyword": "ERROR CODE", "severity": "high", "category": "application_error"},
+      {"keyword": "ROC_TRANSACTION_TIMEOUT", "severity": "high", "category": "timeout"},
+      {"keyword": "ROC_DB_CONNECTION_FAILED", "severity": "critical", "category": "database_issue"},
+      {"keyword": "ROC_INVALID_REQUEST_FORMAT", "severity": "medium", "category": "request_error"},
+      {"keyword": "ROC_AUTH_FAILURE", "severity": "high", "category": "security_issue"},
+      {"keyword": "ROC_SERVICE_UNAVAILABLE_BACKEND", "severity": "critical", "category": "dependency_failure"},
+      {"keyword": "ROC_PERFORMANCE_DEGRADATION", "severity": "medium", "category": "performance"},
+      {"keyword": "ROC_QUEUE_FULL", "severity": "high", "category": "resource_limit"}
+    ],
+    "max_context_chars_around_keyword": 100 
+  },
+  "metrics_to_derive_from_roc_keywords": [ 
+    {
+      "name": "roc_total_critical_keywords_found",
+      "description": "Tổng số lần các keywords quan trọng được tìm thấy trong log ROC.",
+      "type": "sum_of_keyword_counts" 
+    },
+    {
+      "name": "roc_keywords_by_category_count",
+      "description": "Đếm số lần xuất hiện keywords theo từng category.",
+      "type": "group_keyword_counts_by_category"
+    }
+  ],
+  "summary_options": { 
+    "max_error_event_examples": 0, 
+    "max_keyword_match_examples": 7, 
+    "max_critical_info_from_keywords": 0 
+  }
+}
