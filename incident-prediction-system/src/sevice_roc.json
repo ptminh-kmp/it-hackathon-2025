@@ -9,8 +9,8 @@
   "unstructured_log_column_name": "_source.log",
   "csv_metadata_columns_to_keep": ["timestamp", "hostname", "req_id"], 
 
-  "timestamp_processing": { // Nếu có cột timestamp riêng trong CSV (ngoài _source.log)
-    "source_field_in_csv": "timestamp", // Tên cột timestamp trong file CSV gốc
+  "timestamp_processing": {
+    "source_field_in_csv": "timestamp",
     "input_format": "%Y-%m-%dT%H:%M:%S.%fZ"
   },
   "roc_log_string_analysis": {
